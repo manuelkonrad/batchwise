@@ -1,0 +1,186 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "batchwise"
+dynamic = ["version"]
+description = "Lightweight batch processing engine and feature store."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Manuel Konrad", email = "oss@mkonrad.dev" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+  "pytest~=8.3.3",
+  "pytest-cov~=6.0.0",
+  "pytest-html~=4.1.1",
+]
+dev = [
+  "pre-commit~=4.0.1",
+  "ruff~=0.7.4",
+  "mypy~=1.13.0",
+  "bandit[toml,sarif]~=1.7.10",
+]
+full = [
+  "batchwise[test,dev]"
+]
+
+[project.urls]
+Documentation = "https://github.com/manuelkonrad/batchwise#readme"
+Issues = "https://github.com/manuelkonrad/batchwise/issues"
+Source = "https://github.com/manuelkonrad/batchwise"
+
+# ~~~~~ #
+# Hatch #
+# ~~~~~ #
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/batchwise/_version.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/.*",
+  "/notebooks",
+]
+
+[tool.hatch.envs.default]
+python = "3.10"
+features = [
+  "test",
+  "dev",
+]
+post-install-commands = ["pre-commit install"]
+
+[tool.hatch.envs.default.scripts]
+sec = "bandit -c pyproject.toml -r src"
+
+[tool.hatch.envs.hatch-test]
+features = [
+  "test",
+]
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+[tool.hatch.envs.hatch-static-analysis]
+dependencies = []
+python = "3.10"
+features = [
+  "dev",
+]
+config-path = "pyproject.toml"
+
+[tool.hatch.envs.hatch-static-analysis.scripts]
+format-check = [
+  "ruff format --check --diff {args:.}",
+]
+format-fix = [
+  "ruff format {args:.}",
+]
+lint-check = [
+  "ruff check {args:.}",
+  "mypy",
+]
+lint-fix = [
+  "ruff check --fix {args:.}",
+]
+
+# ~~~~~~~~~~~~~~~~~~~ #
+# Pytest and Coverage #
+# ~~~~~~~~~~~~~~~~~~~ #
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+  "--cov",
+  "--cov-report=term",
+  "--cov-report=html",
+  "--cov-report=json",
+  "--html=reports/pytest/index.html",
+]
+testpaths = "tests"
+
+[tool.coverage.run]
+source_pkgs = [
+  "batchwise",
+]
+branch = true
+omit = [
+  "_version.py",
+]
+
+[tool.coverage.paths]
+source = [
+  "src/",
+  "*/site-packages/",
+  "*/dist-packages/",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = "reports/coverage"
+
+[tool.coverage.json]
+output = "reports/coverage/coverage.json"
+
+# ~~~~~~~~~~~~~ #
+# Ruff and Mypy #
+# ~~~~~~~~~~~~~ #
+
+[tool.ruff]
+include = [
+  "pyproject.toml",
+  "src/**/*.py",
+  "tests/**/*.py",
+]
+
+[tool.ruff.lint]
+extend-select = [
+  "I",
+]
+
+[tool.mypy]
+files = [
+  "src/batchwise",
+  "tests",
+]
+ignore_missing_imports = true
+
+# ~~~~~~ #
+# Bandit #
+# ~~~~~~ #
+
+[tool.bandit]
+exclude_dirs = [
+  "notebooks",
+]

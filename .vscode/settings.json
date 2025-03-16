@@ -1,0 +1,8 @@
+{
+  "python.testing.pytestEnabled": true,
+  "python.languageServer": "None",
+  "mypy-type-checker.importStrategy": "fromEnvironment",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  }
+}
