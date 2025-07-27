@@ -424,6 +424,11 @@ class Dataset(BaseModel):
         """Retrieve dataframes for each segment."""
         pass
 
+    @abstractmethod
+    def check_completion(self, segments: dict[str, Any]) -> bool:
+        """Check if the dataset is marked complete for the given segments."""
+        pass
+
 
 class RwDataset(Dataset):
     """Abstract base for datasets that support reading and writing."""
@@ -433,11 +438,6 @@ class RwDataset(Dataset):
         self, dataframe: pd.DataFrame, segments: dict[str, Any]
     ) -> None:
         """Write the given dataframe, partitioned by segments."""
-        pass
-
-    @abstractmethod
-    def check_completion(self, segments: dict[str, Any]) -> bool:
-        """Check if the dataset is marked complete for the given segments."""
         pass
 
     @abstractmethod

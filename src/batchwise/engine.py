@@ -7,7 +7,7 @@ import uuid
 from collections import OrderedDict
 from typing import Any, Callable, Literal
 
-from batchwise.config import config
+from batchwise.config import BatchwiseConfig
 from batchwise.dataset import ArrowDataset
 from batchwise.processor import Processor
 from batchwise.store import FeatureStore
@@ -21,16 +21,26 @@ class Engine:
     def __init__(
         self,
         feature_store: FeatureStore | None = None,
-        processor_default_config: dict[str, Any] | None = None,
+        batchwise_config: BatchwiseConfig | dict | None = None,
     ) -> None:
         """Initialize with an optional feature store."""
-        self._feature_store = feature_store or FeatureStore(
-            catalog_paths=config.catalog_paths
-        )
-        self._processor_default_config = (
-            processor_default_config or config.processor_default_config or {}
-        )
-        self._processor_configs = config.processor_configs or {}
+        self._feature_store = feature_store
+        self._processor_default_config = {}
+        self._processor_configs = {}
+        if batchwise_config is not None:
+            if self._feature_store is not None:
+                raise ValueError(
+                    "Feature store must not be set when engine config is provided."
+                )
+            if isinstance(batchwise_config, dict):
+                batchwise_config = BatchwiseConfig(**batchwise_config)
+            self._feature_store = FeatureStore(
+                catalog_paths=batchwise_config.catalog_paths
+            )
+            self._processor_default_config = batchwise_config.processor_default_config
+            self._processor_configs = batchwise_config.processor_configs
+
+        # state variables for processors and sinks
         self._processors: OrderedDict[str, Processor] = OrderedDict()
         self._sinks: list[str] = []
 
@@ -90,9 +100,9 @@ class Engine:
                 }
         return ArrowDataset(
             name=str(uuid.uuid4()),
-            file_format=file_format,
+            file_format=file_format,  # type: ignore
             dataset_uri=dataset_path,
-            columns=columns,
+            columns=columns,  # type: ignore
             partitioning_columns=partitioning_columns,
             datetime_columns=datetime_columns,
         )

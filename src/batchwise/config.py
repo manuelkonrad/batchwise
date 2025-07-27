@@ -2,21 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-import os
-import sys
 from typing import Any
 
 import yaml
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
-if os.path.basename(sys.argv[0]) == "pytest":
-    cli_parse_args = False
-else:
-    cli_parse_args = True
 
-
-class BatchwiseConfig(BaseSettings, cli_parse_args=cli_parse_args):  # type: ignore
+class BatchwiseConfig(BaseSettings):
     """Configuration for batch processing."""
 
     config_path: str | None = None
@@ -41,4 +34,5 @@ class BatchwiseConfig(BaseSettings, cli_parse_args=cli_parse_args):  # type: ign
             return values
 
 
-config = BatchwiseConfig()
+class BatchwiseConfigCli(BatchwiseConfig, cli_parse_args=True):  # type: ignore
+    """Configuration for batch processing with CLI argument parsing."""

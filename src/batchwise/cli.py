@@ -7,7 +7,7 @@ import logging
 import time
 from pathlib import Path
 
-from batchwise.config import config
+from batchwise.config import BatchwiseConfigCli
 
 logger = logging.getLogger("batchwise")
 
@@ -18,11 +18,12 @@ def cli() -> None:
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    batchwise_config = BatchwiseConfigCli()
     processing = True
     while processing:
         start_time = time.time()
         logger.info("Discovering and running engines.")
-        for path in config.engine_paths:
+        for path in batchwise_config.engine_paths:
             if Path(path).is_dir():
                 file_paths = sorted(Path(path).rglob("*.py"))
             else:
@@ -52,9 +53,9 @@ def cli() -> None:
                         logger.info(f"No engine found in file {file_path}. Skipping.")
                 except Exception as e:
                     logger.error(f"Error while running engine file {file_path}: {e}")
-        if config.interval:
+        if batchwise_config.interval:
             logger.info("Waiting for next iteration.")
-            time.sleep(max(0, config.interval - (time.time() - start_time)))
+            time.sleep(max(0, batchwise_config.interval - (time.time() - start_time)))
         else:
             logger.info(
                 "Tried to run all engines once. Exiting since no interval is set."
