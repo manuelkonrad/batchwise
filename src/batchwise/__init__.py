@@ -3,6 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 from batchwise.engine import Engine
-from batchwise.store import FeatureStore
+from batchwise.processor import PreventCompletion, Window
 
-__all__ = ["Engine", "FeatureStore"]
+__all__ = ["Engine", "PreventCompletion", "Window"]

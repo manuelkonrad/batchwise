@@ -2,182 +2,134 @@
 #
 # SPDX-License-Identifier: MIT
 
+import datetime
 import logging
-import uuid
+import time
 from collections import OrderedDict
-from typing import Any, Callable, Literal
+from multiprocessing import Pool
+from pathlib import Path
+from typing import Callable
 
-from batchwise.config import config
-from batchwise.dataset import ArrowDataset
 from batchwise.processor import Processor
-from batchwise.store import FeatureStore
 
-logger = logging.getLogger("batchwise")
+
+def run_processor(config: dict) -> None:
+    """Run a single processor by name."""
+    processor_name = config["name"]
+    logger = logging.getLogger(config["logger_name"])
+    try:
+        processor = Processor(**config)
+        logger.info(f"Running processor '{processor_name}'.")
+        processor()
+    except Exception as e:
+        if config["abort_on_exception"]:
+            raise e
+        else:
+            logger.error(f"Processor {processor_name} failed with exception: {e}")
 
 
 class Engine:
-    """Manages processors and orchestrates data processing."""
+    """Batch processing engine to manage and run processors."""
 
     def __init__(
         self,
-        feature_store: FeatureStore | None = None,
-        processor_default_config: dict[str, Any] | None = None,
+        checkpoint_path: Path | str = "./batchwise_checkpoints",
+        logger_name: str = "batchwise",
+        timezone: datetime.tzinfo | None = datetime.timezone.utc,
+        fs=None,
     ) -> None:
-        """Initialize with an optional feature store."""
-        self._feature_store = feature_store or FeatureStore(
-            catalog_paths=config.catalog_paths
-        )
-        self._processor_default_config = (
-            processor_default_config or config.processor_default_config or {}
-        )
-        self._processor_configs = config.processor_configs or {}
-        self._processors: OrderedDict[str, Processor] = OrderedDict()
-        self._sinks: list[str] = []
+        """Initialize the batch processing engine.
+
+        Args:
+            checkpoint_path (Path | str): Path to store processor checkpoints.
+            logger_name (str): Name of the logger to use.
+            timezone (datetime.tzinfo | None): Timezone for processing windows.
+            fs: Optional filesystem abstraction.
+        """
+        self._checkpoint_path = Path(checkpoint_path)
+        self._processor_configs: dict[str, dict] = OrderedDict()
+        self._abort_on_exception = False
+        self._timezone = timezone
+        self._logger_name = logger_name
+        self._fs = fs
 
     def processor(
         self,
-        name: str,
-        sink: str,
-        source: str | list[str] | None = None,
-        extend_before: int = 0,
-        extend_after: int = 0,
-        max_lookback: int = 10,
-        completion_delay: str = "2 minutes",
-        output_mode: Literal["overwrite", "complete", "append"] = "overwrite",
-        post_processing_callback: Callable[..., None] | None = None,
-        every: str | None = None,
-        config: dict[str, Any] | None = None,
-    ) -> Callable[..., None]:
-        """Decorator to register a processor with given parameters."""
+        interval: str,
+        delay: str,
+        lookback: str,
+        include_incomplete: bool = False,
+        context: dict | None = None,
+    ) -> Callable:
+        """Decorator to register a processor function.
 
-        def processor_inner(function):
-            self.add_processor(
-                name=name,
-                source=source,
-                sink=sink,
-                function=function,
-                extend_before=extend_before,
-                extend_after=extend_after,
-                max_lookback=max_lookback,
-                completion_delay=completion_delay,
-                output_mode=output_mode,
-                post_processing_callback=post_processing_callback,
-                every=every,
-                config=config,
+        Args:
+            interval (str): Cron expression for processing intervals.
+            delay (str): Delay before considering a window complete.
+            lookback (str): Lookback period for processing windows.
+            include_incomplete (bool): Whether to include incomplete windows.
+            context (dict | None): Additional context for the processor.
+
+        Returns:
+            Callable: Decorator function.
+        """
+
+        def _processor_inner(func: Callable) -> Callable:
+            if func.__name__ in self._processor_configs:
+                raise ValueError("Processor name must be unique.")
+            self._processor_configs[func.__name__] = dict(
+                name=func.__name__,
+                func=func,
+                interval=interval,
+                delay=delay,
+                lookback=lookback,
+                include_incomplete=include_incomplete,
+                context=context,
+                abort_on_exception=self._abort_on_exception,
+                checkpoint_path=self._checkpoint_path,
+                timezone=self._timezone,
+                logger_name=self._logger_name,
+                fs=self._fs,
             )
+            return func
 
-        return processor_inner
+        return _processor_inner
 
-    def _create_simple_dataset_handler(self, dataset_string: str) -> ArrowDataset:
-        """Create a minimal Dataset handler from a dataset string."""
-        file_format, dataset_path = dataset_string.split("@")
-        columns = dict()
-        partitioning_columns = []
-        datetime_columns = []
-        if "[" in dataset_path:
-            dataset_path, partitioning_string = dataset_path.split("[")
-            partitioning_string = partitioning_string.strip("]")
-            partitioning_scheme, partition_columns = partitioning_string.split(":")
-            partitioning_column_strings = partition_columns.split(",")
+    def _run_in_loop(self) -> None:
+        """Run registered processors sequentially."""
+        for processor_config in self._processor_configs.values():
+            run_processor(processor_config)
 
-            for partitioning_column in partitioning_column_strings:
-                column_name, column_type = partitioning_column.split("=")
-                partitioning_columns.append(column_name)
-                if column_type in ["date", "year", "month", "day", "hour", "minute"]:
-                    datetime_columns.append(column_name)
-                columns[column_name] = {
-                    "column_type": column_type,
-                }
-        return ArrowDataset(
-            name=str(uuid.uuid4()),
-            file_format=file_format,
-            dataset_uri=dataset_path,
-            columns=columns,
-            partitioning_columns=partitioning_columns,
-            datetime_columns=datetime_columns,
-        )
+    def _run_in_pool(self, num_processes: int) -> None:
+        """Run registered processors in parallel."""
+        with Pool(processes=num_processes) as pool:
+            list(pool.imap_unordered(run_processor, self._processor_configs.values()))
 
-    def _get_dataset_handler(self, dataset_string: str) -> ArrowDataset:
-        """Retrieve or build a dataset handler from registry or path."""
-        if "@" in dataset_string:
-            return self._create_simple_dataset_handler(dataset_string)
-        else:
-            catalog_name, dataset_name = dataset_string.split(":")
-            if self._feature_store is not None:
-                return self._feature_store.catalogs[catalog_name][dataset_name]
-            else:
-                raise ValueError("Feature store must be specified.")
-
-    def _get_dataset_handlers(
-        self, source: str | list[str] | None, sink: str
-    ) -> dict[str, Any]:
-        """Get dataset handlers for source and sink."""
-        dataset_handlers: dict[str, Any] = {"source": None, "sink": None}
-        if isinstance(source, list):
-            dataset_handlers["source"] = []
-            for dataset_string in source:
-                dataset_handlers["source"].append(
-                    self._get_dataset_handler(dataset_string)
-                )
-        elif source:
-            dataset_handlers["source"] = self._get_dataset_handler(source)
-        else:
-            dataset_handlers["source"] = None
-        if sink:
-            dataset_handlers["sink"] = self._get_dataset_handler(sink)
-        else:
-            raise ValueError("Sink must be specified.")
-        return dataset_handlers
-
-    def add_processor(
+    def __call__(
         self,
-        function: Callable[..., Any],
-        name: str,
-        source: str | list[str] | None,
-        sink: str,
-        extend_before: int,
-        extend_after: int,
-        max_lookback: int,
-        completion_delay: str,
-        output_mode: str,
-        post_processing_callback: Callable[..., None] | None,
-        every: str | None,
-        config: dict[str, Any] | None,
+        num_processes: int = 1,
+        every_seconds: int | float | None = None,
     ) -> None:
-        """Add a new processor to the Engine."""
-        if sink not in self._sinks:
-            self._sinks.append(sink)
-        else:
-            raise ValueError("Sink must be unique.")
-        if name in self._processors:
-            raise ValueError("Processor name must be unique.")
-        processor_config = dict(self._processor_default_config)
-        if name in self._processor_configs:
-            processor_config.update(self._processor_configs[name])
-        if config:
-            processor_config.update(config)
-        self._processors[name] = Processor(
-            function=function,
-            dataset_handlers=self._get_dataset_handlers(source, sink),
-            extend_before=extend_before,
-            extend_after=extend_after,
-            max_lookback=max_lookback,
-            completion_delay=completion_delay,
-            output_mode=output_mode,
-            post_processing_callback=post_processing_callback,
-            every=every,
-            config=processor_config,
-        )
+        """Execute all registered processors.
 
-    def run_sequentially(self) -> None:
-        """Run all registered processors in sequence."""
-        for processor_name, processor in self._processors.items():
-            logger.info(f"Running processor {processor_name}.")
-            try:
-                processor()
-            except Exception as e:
-                logger.error(f"Error while running processor {processor_name}: {e}")
-
-    def __call__(self) -> None:
-        """Executes run_sequentially when called."""
-        self.run_sequentially()
+        Args:
+            num_processes (int): Number of processes to use for parallel execution. If 1, runs sequentially.
+            every_seconds (int | float | None): Minimum time in seconds between full cycles. If None, runs only once.
+        """
+        logger = logging.getLogger(self._logger_name)
+        while True:
+            start_time = time.time()
+            logger.info("Running engine iteration.")
+            num_processes = int(num_processes)
+            if num_processes > 1:
+                self._run_in_pool(num_processes)
+            elif num_processes == 1:
+                self._run_in_loop()
+            else:
+                raise ValueError("num_processes must cast to a positive integer.")
+            if every_seconds is not None:
+                sleep_time = start_time + every_seconds - time.time()
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+            else:
+                break
