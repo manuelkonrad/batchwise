@@ -112,6 +112,7 @@ class Column(BaseModel):
     object_format: StringFormat | ImageFormat | RawFormat | None = None
     type_string: str | None = None
     description: str | None = None
+    value_range: tuple[float | None, float | None] | None = None
 
     @model_validator(mode="before")
     @classmethod
