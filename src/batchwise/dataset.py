@@ -558,6 +558,8 @@ class ArrowDataset(RwDataset):
             )
             expressions = [pc.scalar(False)]
             for partition in partitions:
+                if partition not in partitions_in_range:
+                    continue
                 sub_expressions = []
                 for col, value in zip(self.partitioning_columns, partition.split("/")):
                     sub_expressions.append(pc.field(col) == value)
@@ -583,7 +585,7 @@ class ArrowDataset(RwDataset):
             partition_dict = ds.get_partition_keys(frag.partition_expression)
             partition = [partition_dict.get(col) for col in self.partitioning_columns]
             partitions.append("/".join(partition))
-        return list(set(partitions))
+        return sorted(list(set(partitions)), reverse=True)
 
     def check_completion(self, segments: dict[str, Any]) -> bool:
         """Check if the given segments are marked complete."""
