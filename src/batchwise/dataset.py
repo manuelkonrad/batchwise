@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import yaml
 from fsspec.implementations.arrow import ArrowFSWrapper
@@ -497,10 +498,9 @@ class ArrowDataset(RwDataset):
         return self
 
     def get_dataframes(
-        self, segments: dict[str, dict[str, Any]]
+        self, filter_expressions: dict[str, pc.Expression]
     ) -> dict[str, pd.DataFrame]:
         """Return dataframes for each requested segment from Arrow dataset."""
-        filter_expressions = self._get_filter_expression(segments)
         dataframes = {}
         for segment_name, filter_expression in filter_expressions.items():
             if self.file_format == "binary":
@@ -518,10 +518,17 @@ class ArrowDataset(RwDataset):
                 dataframes[segment_name] = pa_ds.to_table().to_pandas()
         return dataframes
 
-    def get_dataframes_date_range(
+    def get_dataframes_segments(
+        self, segments: dict[str, dict[str, Any]]
+    ) -> dict[str, pd.DataFrame]:
+        """Return dataframes for each requested segment from Arrow dataset."""
+        filter_expressions = self._get_filter_expression(segments)
+        return self.get_dataframes(filter_expressions)
+
+    def _get_segments_date_range(
         self, start: datetime.date, end: datetime.date
     ) -> pd.DataFrame:
-        """Return a dataframe covering the specified date range."""
+        """Return segments covering the specified date range."""
         unit_delta = datetime.timedelta(days=1)
         parts = []
         for i in range((end - start).days + 1):
@@ -534,7 +541,49 @@ class ArrowDataset(RwDataset):
                 "unit": "day",
             }
         }
-        return self.get_dataframes(segments)["range"]
+        return segments
+
+    def get_dataframe_date_range(
+        self,
+        start: datetime.date,
+        end: datetime.date,
+        partitions: list[str] | None = None,
+    ) -> tuple[pd.DataFrame, list[str] | None]:
+        """Return a dataframe covering the specified date range."""
+        segments = self._get_segments_date_range(start, end)
+        filter_expressions_range = self._get_filter_expression(segments)
+        if partitions is not None:
+            partitions_in_range = self.get_partitions_data_range(
+                filter_expressions_range["range"]
+            )
+            expressions = [pc.scalar(False)]
+            for partition in partitions:
+                sub_expressions = []
+                for col, value in zip(self.partitioning_columns, partition.split("/")):
+                    sub_expressions.append(pc.field(col) == value)
+                expressions.append(functools.reduce(operator.and_, sub_expressions))
+            filter_expressions_partitions = {}
+            filter_expressions_partitions["partitions"] = functools.reduce(
+                operator.or_, expressions
+            )
+            return self.get_dataframes(filter_expressions_partitions)[
+                "partitions"
+            ], partitions_in_range
+        else:
+            partitions_in_range = None
+            return self.get_dataframes(filter_expressions_range)[
+                "range"
+            ], partitions_in_range
+
+    def get_partitions_data_range(self, filter_expression: pc.Expression) -> list[str]:
+        pa_ds = self._get_arrow_dataset()
+        fragments = pa_ds.get_fragments(filter=filter_expression)
+        partitions = []
+        for frag in fragments:
+            partition_dict = ds.get_partition_keys(frag.partition_expression)
+            partition = [partition_dict.get(col) for col in self.partitioning_columns]
+            partitions.append("/".join(partition))
+        return list(set(partitions))
 
     def check_completion(self, segments: dict[str, Any]) -> bool:
         """Check if the given segments are marked complete."""

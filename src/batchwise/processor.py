@@ -59,19 +59,19 @@ class Processor:
             if "source_data" in self._signature:
                 if isinstance(self._dataset_handlers.get("source"), list):
                     input_dict["source_data"] = [
-                        handler.get_dataframes(segments)
+                        handler.get_dataframes_segments(segments)
                         for handler in self._dataset_handlers["source"]
                     ]
                 elif self._dataset_handlers.get("source"):
                     input_dict["source_data"] = self._dataset_handlers[
                         "source"
-                    ].get_dataframes(segments)
+                    ].get_dataframes_segments(segments)
                 else:
                     input_dict["source_data"] = None
             if "sink_data" in self._signature:
-                input_dict["sink_data"] = self._dataset_handlers["sink"].get_dataframes(
-                    segments
-                )
+                input_dict["sink_data"] = self._dataset_handlers[
+                    "sink"
+                ].get_dataframes_segments(segments)
             if "source_fs" in self._signature:
                 if isinstance(self._dataset_handlers["source"], list):
                     input_dict["source_fs"] = []
